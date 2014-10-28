@@ -32,6 +32,12 @@ var translate = require('translate');
 translate.text('Yo quero tacos por favor', function(result){
      say.speak('Alex', result);
 });
+
+//stop current and future utterances
+say.stop()
+
+//skip current utterance
+say.skip()
 ```
 
 
