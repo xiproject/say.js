@@ -1,79 +1,127 @@
 'use strict';
 
-var spawn = require('child_process').spawn,
-  child;
+var spawn = require('child_process').spawn;
+var childD;
 
 var say = exports;
+var speakingQueue = [];
+var speaking = false;
 
-if (process.platform === 'darwin') {
-  say.speaker = 'say';
-}
-else if (process.platform === 'linux') {
-  say.speaker = 'festival';
-}
-
-// say stuff, speak
-exports.speak = function(voice, text, callback) {
-  var commands,
-    pipedData;
-
-  if (arguments.length < 2) {
-    console.log('invalid amount of arguments sent to speak()');
-    return;
-  }
-
-  if (process.platform === 'darwin') {
-    if (!voice) {
-      commands = [ text ];
+var psTree = require('ps-tree');
+/*
+child.kill only kills the child and not the process spawned by it.
+Festival calls on aplay to play the speech sound and that is not killed when festival is killed.
+*/
+var kill = function(pid, signal, callback) {
+    signal = signal || 'SIGKILL';
+    callback = callback || function() {};
+    var killTree = true;
+    if (killTree) {
+        psTree(pid, function(err, children) {
+            [pid].concat(
+                children.map(function(p) {
+                    return p.PID;
+                })
+            ).forEach(function(tpid) {
+                try {
+                    process.kill(tpid, signal);
+                } catch (ex) {}
+            });
+            callback();
+        });
     } else {
-      commands = [ '-v', voice, text];
+        try {
+            process.kill(pid, signal);
+        } catch (ex) {}
+        callback();
     }
-  } else if (process.platform === 'linux') {
-    commands = ['--pipe'];
-    pipedData = '(' + voice + ') (SayText \"' + text + '\")';
-  }
-
-
-  var childD = spawn(say.speaker, commands);
-
-  childD.stdin.setEncoding('ascii');
-  childD.stderr.setEncoding('ascii');
-
-  if (process.platform === 'linux') {
-    childD.stdin.end(pipedData);
-  }
-
-
-  childD.stderr.on('data', function(data){ console.log(data); });
-  childD.stdout.on('data', function(data){ console.log(data); });
-
-
-  childD.addListener('exit', function (code, signal) {
-    if (code === null || signal !== null) {
-      console.log('couldnt talk, had an error ' + '[code: '+ code + '] ' + '[signal: ' + signal + ']');
-    }
-
-    // we could do better than a try / catch here
-    try {
-      callback();
-    } catch(err) {
-      // noop
-    }
-  });
 };
 
-/*
-    This code doesnt work....but it could!
-    // monkey punch sys.puts to speak, lol
-    say.puts();
+if (process.platform === 'darwin') {
+    say.speaker = 'say';
+} else if (process.platform === 'linux') {
+    say.speaker = 'festival';
+}
 
-    sys.puts('whats, up dog?'); // did you hear that?
-    exports.puts = function(){
 
-      var s2 = require('util');
-      // don't try this at home
-      sys.puts = function(text){
-        s2.puts(text);
-      };
+function speak() {
+    var commands;
+    var pipedData;
+
+    if (speakingQueue.length > 0) {
+        var dialogue = speakingQueue.splice(0, 1)[0];
+        speaking = true;
+        if (process.platform === 'darwin') {
+            if (!dialogue.voice) {
+                commands = [dialogue.text];
+            } else {
+                commands = ['-v', dialogue.voice, dialogue.text];
+            }
+        } else if (process.platform === 'linux') {
+            commands = ['--pipe'];
+            pipedData = '(' + dialogue.voice + ') (SayText \"' + dialogue.text + '\")';
+        }
+        childD = spawn(say.speaker, commands);
+
+        childD.stdin.setEncoding('ascii');
+        childD.stderr.setEncoding('ascii');
+
+        if (process.platform === 'linux') {
+            childD.stdin.end(pipedData);
+        }
+
+
+        childD.stderr.on('data', function(data) {
+            console.log(data);
+        });
+        childD.stdout.on('data', function(data) {
+            console.log(data);
+        });
+
+
+        childD.on('exit', function(code, signal) {
+            //child was not killed by parent
+            childD = null;
+            speaking = false;
+            speak();
+            if (!signal && code !== 0) {
+                //if error occured
+                console.log('couldnt talk, had an error ' + '[code: ' + code + '] ' + '[signal: ' + signal + ']');
+            }
+            if (dialogue.callback) {
+                dialogue.callback();
+            }
+        });
     }
-*/
+}
+
+exports.speak = function(voice, text, callback) {
+
+    if (arguments.length < 2) {
+        console.log('invalid amount of arguments sent to speak()');
+        return;
+    }
+
+    speakingQueue.push({
+        voice: voice,
+        text: text,
+        callback: callback
+    });
+    if (!speaking)
+        speak();
+};
+
+
+exports.stop = function() {
+    //if child is alive
+    if (childD) {
+        kill(childD.pid);
+        speakingQueue = [];
+    }
+};
+
+exports.skip = function() {
+    if (childD) {
+        kill(childD.pid);
+    }
+};
