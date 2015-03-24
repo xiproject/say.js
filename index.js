@@ -79,7 +79,7 @@ function speak() {
             console.log(data);
         });
         childD.stdout.on('data', function(data) {
-            console.log(data);
+            //console.log(data);
         });
 
 
