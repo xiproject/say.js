@@ -37,36 +37,40 @@ var kill = function(pid, signal, callback) {
     }
 };
 
-if (process.platform === 'darwin') {
-    say.speaker = 'say';
-} else if (process.platform === 'linux') {
-    say.speaker = 'festival';
-}
-
 
 function speak() {
     var commands;
-    var pipedData;
+    var pipedData = null;
 
     if (speakingQueue.length > 0) {
         var dialogue = speakingQueue.splice(0, 1)[0];
         speaking = true;
         if (process.platform === 'darwin') {
+            say.speaker = 'say';
             if (!dialogue.voice) {
                 commands = [dialogue.text];
             } else {
                 commands = ['-v', dialogue.voice, dialogue.text];
             }
         } else if (process.platform === 'linux') {
-            commands = ['--pipe'];
-            pipedData = '(' + dialogue.voice + ') (SayText \"' + dialogue.text + '\")';
+            if (dialogue.voice === 'google') {
+                var url = "http://translate.google.com/translate_tts?tl=en&q=" + dialogue.text;
+                say.speaker = 'vlc';
+                commands = ['-I', 'rc', '--no-video', '--play-and-exit', url];
+            }
+            else {
+                say.speaker = 'festival';
+                commands = ['--pipe'];
+                pipedData = '(' + dialogue.voice + ') (SayText \"' + dialogue.text + '\")';
+
+            }
         }
         childD = spawn(say.speaker, commands);
 
         childD.stdin.setEncoding('ascii');
         childD.stderr.setEncoding('ascii');
 
-        if (process.platform === 'linux') {
+        if (pipedData !== null) {
             childD.stdin.end(pipedData);
         }
 
